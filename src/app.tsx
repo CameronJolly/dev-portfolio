@@ -18,8 +18,11 @@ function App() {
           <Route element={<MainLayout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/Portfolio" element={<Portfolio />} />
+            <Route path="/portfolio" element={<Portfolio/>} />
             <Route path="/Contact" element={<Contact />} />
+            <Route path="/contact" element={<Contact/>} />
             <Route path="/Resume" element={<Resume />}/>
+            <Route path="/resume" element={<Resume/>}/>
           </Route>
         </Routes>
       </BrowserRouter>
