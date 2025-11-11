@@ -7,6 +7,7 @@ import Contact from "./pages/contact";
 import Portfolio from "./pages/portfolio";
 import IntroVideo from "./components/intro";
 import Resume from "./pages/resume";
+import ParticleSim from "./pages/particleSim";
 
 function App() {
   const [showIntro, setShowIntro] = useState(true);
@@ -23,6 +24,10 @@ function App() {
             <Route path="/contact" element={<Contact/>} />
             <Route path="/Resume" element={<Resume />}/>
             <Route path="/resume" element={<Resume/>}/>
+            <Route path="/ParticleSim" element={<ParticleSim/>}/>
+            <Route path="/Particlesim" element={<ParticleSim/>}/>
+            <Route path="/particleSim" element={<ParticleSim/>}/>
+            <Route path="/particlesim" element={<ParticleSim/>}/>
           </Route>
         </Routes>
       </BrowserRouter>

@@ -1,0 +1,57 @@
+body { 
+    margin: 0; 
+    cursor: move;
+}
+
+.settings-menu{
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
+
+    background-color: #2b2727;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 12px 14px;
+    width: 280px;
+    max-width: calc(100% - 32px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+
+.settings-title{
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.settings-section{
+    display: grid;
+    gap: 8px;
+}
+
+.settings-row{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.settings-row label{
+    font-size: 13px;
+    color: #ffffff;
+}
+
+.settings-row input[type="range"]{
+    flex: 1;
+}
+
+.checkbox-label{
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+    cursor: default;
+}
