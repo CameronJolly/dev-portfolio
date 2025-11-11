@@ -6,7 +6,7 @@ function SimMenu() {
   const [gasConst, setGasConst] = useState(80);
   const [gravity, setGravity] = useState(9);
   const [viscosity, setViscosity] = useState(80);
-  const [particleCount, setParticleCount] = useState(3000);
+  const [particleCount, setParticleCount] = useState(1500);
   const [mouseEffect, setMouseEffect] = useState(true);
   const [isOpen, setIsOpen] = useState(true);
 
