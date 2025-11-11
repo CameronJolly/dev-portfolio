@@ -5,6 +5,9 @@ function ParticleSim() {
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    
     let dispose: (() => void) | undefined;
     let mounted = true;
 
@@ -21,6 +24,10 @@ function ParticleSim() {
     })();
 
     return () => {
+      document.body.style.overflow = "";
+      document.body.style.cursor = "";
+      document.documentElement.style.overflow = "";
+      
       mounted = false;
       dispose?.();
       dispose = undefined;

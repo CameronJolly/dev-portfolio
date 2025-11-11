@@ -203,15 +203,3 @@ input[type="checkbox"]:focus + .toggle-slider{
     box-shadow: 0 0 1px #4a4a4a;
 }
 
-
-body { 
-    margin: 0; 
-    cursor: move;
-    overflow: hidden;
-    height: 100vh;
-}
-
-html {
-    overflow: hidden;
-    height: 100vh;
-}
