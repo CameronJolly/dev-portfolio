@@ -125,6 +125,7 @@ function attachSliderHandlers() {
   const gasConstSlider = document.getElementById("gas-const");
   const viscocitySlider = document.getElementById("viscocity");
   const particleSlider = document.getElementById("particles");
+  const mouseBehaviour = document.getElementById("mouse-behaviour");
 
   if (
     !engine ||
@@ -138,6 +139,12 @@ function attachSliderHandlers() {
   }
 
   const disposers = [];
+
+  const mouseBehaviourHandler = () => {
+    engine.forceDirection = !engine.forceDirection;
+  };
+  mouseBehaviour.addEventListener("change", mouseBehaviourHandler);
+  disposers.push(() => mouseBehaviour.removeEventListener("change", mouseBehaviourHandler));
 
   const restDensityHandler = (event) => engine.setRestDensity(event.target.value);
   restDensitySlider.addEventListener("input", restDensityHandler);

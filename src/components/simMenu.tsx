@@ -31,6 +31,12 @@ function SimMenu() {
           <label htmlFor="particles">Particle Count</label>
           <input id="particles" type="range" min="0" max="10000" step="1" defaultValue="3000" />
         </div>
+
+        <div className="settings-row">
+          <label htmlFor="mouse-behaviour">Toggle Mouse Behavoiur</label>
+          <input type="checkbox" id="mouse-behaviour" ></input>
+        </div>
+
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ export default function MainLayout() {
   return (
     <>     
       <BackgroundCanvas /> 
-      <Header />
+      {!hideFooter && <Header />}
       <main>
         <Outlet /> {}
       </main>

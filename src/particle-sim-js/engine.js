@@ -12,6 +12,8 @@ class Engine {
     #particles = [];
     numParticles;
 
+    forceDirection = true;
+
     positions;
     velocities;
     accelerations;
@@ -451,7 +453,11 @@ class Engine {
         this.calculatePressure();
         this.calculatePressureForce(bounds);
         this.applyViscosity(dt, bounds);
-        this.applyOutwardForce(bounds);
+        if(this.forceDirection){
+            this.applyOutwardForce(bounds);
+        }else{
+            this.applyInwardForce(bounds);
+        }
 
         this.applyPhysics(dt);
     }
@@ -519,6 +525,42 @@ class Engine {
             }
         }
     }
+
+    applyInwardForce(bounds, radius = 10.0, strength = 125) {
+        if (this.mouseX === undefined || this.mouseY === undefined) return;
+
+        const rMax2 = radius * radius;
+
+        const cellX = Math.floor((this.mouseX - bounds.minX) / this.H);
+        const cellY = Math.floor((this.mouseY - bounds.minY) / this.H);
+        if (cellX < 0 || cellX >= this.gridWidth || cellY < 0 || cellY >= this.gridHeight) return;
+
+        const neighborCells = this.getNeighborCellsInRadius(cellX, cellY, radius);
+
+        for (let c = 0; c < neighborCells.length; c++) {
+            const cell = neighborCells[c];
+            for (let n = 0; n < cell.length; n++) {
+                const pIdx = cell[n];
+                const pX = this.positions[pIdx * 2];
+                const pY = this.positions[pIdx * 2 + 1];
+
+                const dx = pX - this.mouseX;
+                const dy = pY - this.mouseY;
+                const r2 = dx * dx + dy * dy;
+
+                if (r2 === 0 || r2 > rMax2) continue;
+
+                const r = Math.sqrt(r2);
+                const invR = 1 / r;
+                const falloff = 1 - (r / radius);
+                const scaled = strength * falloff * falloff;
+
+                this.accelerations[pIdx * 2]     -= dx * invR * scaled;
+                this.accelerations[pIdx * 2 + 1] -= dy * invR * scaled;
+            }
+        }
+    }
+
 
     addParticles(num, scene) {
         const oldCount = this.numParticles;
