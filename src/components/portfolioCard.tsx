@@ -1,12 +1,6 @@
 import "../css/portfolioCard.css"
 import { NavLink } from 'react-router-dom';
 
-interface PortfolioCardProps {
-    projectLink: string;
-    title: string;
-    imageLink: string;
-    description: string;
-}
 
 function PortfolioCard({description='',imageLink='', title='', projectLink = ''}) {
     const isExternal = projectLink.startsWith('http');
