@@ -131,7 +131,7 @@ export default function BackgroundCanvas() {
 
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(7, 49, 117, 1)";
+        ctx.fillStyle = "rgba(40, 40, 40, 1)";
         ctx.fill();
       }
 

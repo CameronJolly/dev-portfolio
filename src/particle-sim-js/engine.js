@@ -48,6 +48,21 @@ class Engine {
     lastTime = 0;
     accumulator = 0;
 
+    //webgpu globals
+    queue;
+    device;
+    densitiesBuffer;
+    positionsBuffer;
+    accelerationsBuffer;
+    viscocitiesBuffer;
+    velocitiesBuffer;
+    sphCalcUniformBuffer;
+    boundsUniformBuffer;
+    sphCalcBindGroup;
+    computePipeline;
+
+
+
     async init() {
         await this.initWebGPU();
     }
@@ -62,8 +77,92 @@ class Engine {
             throw new Error("Couldn't request WebGPU adapter.");
         }
 
-        const device = await adapter.requestDevice();
-        console.log("WebGPU device acquired:", device);
+        this.device = await adapter.requestDevice();
+        this.queue = this.device.queue;
+
+        // getting wgsl text and parsing it for use in tsl pipeline
+        const shaderResponse = await fetch('src/particle-sim-js/compute-shaders/sphPipeline.wgsl');
+        const shaderCode = await shaderResponse.text();
+
+        // creating webgpu shader module which loads the raw wgsl an duses it
+        const shaderModule = this.device.createShaderModule({code: shaderCode});
+
+        //creating buffers to send to the gpu, they have to be strictly typed
+        this.densitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        });
+
+        this.positionsBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        this.accelerationsBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        this.viscocitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        
+        this.velocitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        //buffer for globals needed for the sph pipeline
+        this.sphCalcUniformBuffer = this.device.createBuffer({
+            size: 32,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        this.boundsUniformBuffer = this.device.createBuffer({
+            size: 32,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // creating layout for the pressure bind group (what is getting sent into the compute shader kernel)
+        const pressureBindGroupLayout = this.device.createBindGroupLayout({
+            entries: [
+                {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'uniform'}},
+                {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'uniform'}},
+                {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+            ]
+        })
+
+        this.sphCalcBindGroup = this.device.createBindGroup({
+            layout: pressureBindGroupLayout,
+            entries: [
+                {binding: 0, resource: {buffer: this.boundsUniformBuffer}},
+                {binding: 1, resource: {buffer: this.sphCalcUniformBuffer}},
+                {binding: 2, resource: {buffer: this.densitiesBuffer}},
+                {binding: 3, resource: {buffer: this.positionsBuffer}},
+                {binding: 4, resource: {buffer: this.accelerationsBuffer}},
+                {binding: 5, resource: {buffer: this.viscocitiesBuffer}},
+                {binding: 6, resource: {buffer: this.velocitiesBuffer}},
+            ]
+        });
+
+        //setup pressure compute pipeline
+        this.computePipeline = this.device.createComputePipeline({
+            layout: this.device.createPipelineLayout({
+                bindGroupLayouts: [pressureBindGroupLayout]
+            }),
+            compute: {
+                module: shaderModule,
+                entryPoint: 'main'
+            }
+        });
+
+        
     }
 
     poly6Kernel(r2, h) {
@@ -112,7 +211,6 @@ class Engine {
         return neighbors;
     }
 
-    // New: gather all neighbor cells within a world-space radius
     getNeighborCellsInRadius(cellX, cellY, radius) {
         const cellR = Math.ceil(radius / this.H);
         const minCX = Math.max(0, cellX - cellR);
@@ -248,11 +346,33 @@ class Engine {
         });
     }
 
-    calculatePressure() {
+    async calculatePressure() {
+        // this.queue.writeBuffer(this.densityBuffer, 0, this.densities);
+        
+        // const pressureCalcUniformData = new Float32Array([
+        //     this.GAS_CONST,
+        //     this.REST_DENSITY,
+        //     0, 0
+        // ]);
+        // this.queue.writeBuffer(this.sphCalcUniformBuffer, 0, pressureCalcUniformData);
+
+        // const pressureCommandEncoder = this.device.createCommandEncoder();
+        // const passEncoder = pressureCommandEncoder.beginComputePass();
+
+        // passEncoder.setPipeline(this.computePipeline);
+        // passEncoder.setBindGroup(0, this.sphCalcBindGroup);
+
+        // const workgroupCount = Math.ceil(this.numParticles / 64);
+        // passEncoder.dispatchWorkgroups(workgroupCount);
+        // passEncoder.end();
+
+        // this.queue.submit([pressureCommandEncoder.finish()]);
+
         this.#particles.forEach(particle => {
             const pressure = this.GAS_CONST * (this.densities[particle.index]-this.REST_DENSITY);
             this.pressures[particle.index] = Math.max(0,pressure);
         });
+        
     }
 
     calculatePressureForce(bounds) {
@@ -432,7 +552,7 @@ class Engine {
         }
     }
 
-    stepPhysics(dt, bounds) {
+     async stepPhysics(dt, bounds) {
         // Reset accelerations
         for (let i = 0; i < this.accelerations.length/2; i++) {
             this.accelerations[i*2] = 0;
@@ -450,7 +570,7 @@ class Engine {
 
         // SPH pipeline
         this.calculateDensity(bounds);
-        this.calculatePressure();
+        await this.calculatePressure();
         this.calculatePressureForce(bounds);
         this.applyViscosity(dt, bounds);
         if(this.forceDirection){
@@ -462,7 +582,7 @@ class Engine {
         this.applyPhysics(dt);
     }
 
-    update(now, bounds) {
+    async update(now, bounds) {
         if (this.lastTime === 0) {
             this.lastTime = now;
             // Initialize grid on first frame
@@ -478,7 +598,7 @@ class Engine {
 
         let steps = 0;
         while (this.accumulator >= this.FIXED_DT && steps < this.MAX_STEPS) {
-            this.stepPhysics(this.FIXED_DT, bounds);
+            await this.stepPhysics(this.FIXED_DT, bounds);
             this.handleCollisions(bounds);
             this.accumulator -= this.FIXED_DT;
             steps++;
@@ -560,7 +680,6 @@ class Engine {
             }
         }
     }
-
 
     addParticles(num, scene) {
         const oldCount = this.numParticles;

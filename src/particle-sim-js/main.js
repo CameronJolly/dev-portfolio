@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import Engine from './engine.js';
+import { WebGLRenderer } from 'three';
 
 const raycaster = new THREE.Raycaster();
 const planeZ0 = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -36,7 +37,10 @@ function setupScene(hostElement) {
   const height = hostElement.clientHeight || window.innerHeight;
 
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-  renderer = new THREE.WebGPURenderer();
+  const useWebGPU = !/firefox/i.test(navigator.userAgent);
+  renderer = useWebGPU
+    ? new THREE.WebGPURenderer()
+    : new WebGLRenderer({ antialias: true });
   renderer.setSize(width, height);
   renderer.domElement.style.width = "100%";
   renderer.domElement.style.height = "100%";
@@ -185,12 +189,11 @@ function animate(now) {
   }
   animationFrameId = requestAnimationFrame(animate);
   engine.update(now, bounds);
-  renderer.renderAsync(scene, camera);
+  renderer.render(scene, camera);
 }
 
 export async function startParticleSim(hostElement) {
   engine = new Engine();
-  await engine.init();
 
   const targetHost = hostElement || document.body;
   setupScene(targetHost);
@@ -207,7 +210,7 @@ export async function startParticleSim(hostElement) {
     bounds.maxY,
     scene
   );
-
+  await engine.init();
   animationFrameId = requestAnimationFrame(animate);
 
   return () => {
