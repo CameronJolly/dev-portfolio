@@ -183,13 +183,20 @@ function attachSliderHandlers() {
   };
 }
 
-function animate(now) {
+async function animate(now) {
   if (!engine || !renderer || !camera || !bounds) {
     return;
   }
+
+  try {
+    await engine.update(now, bounds);
+    renderer.render(scene, camera);
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+
   animationFrameId = requestAnimationFrame(animate);
-  engine.update(now, bounds);
-  renderer.render(scene, camera);
 }
 
 export async function startParticleSim(hostElement) {
@@ -211,6 +218,9 @@ export async function startParticleSim(hostElement) {
     scene
   );
   await engine.init();
+  if (typeof renderer.init === "function") {
+    await renderer.init();
+  }
   animationFrameId = requestAnimationFrame(animate);
 
   return () => {
