@@ -210,7 +210,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let activated = global_id.x < globals.numParticles;
     if (activated) {
         accelerations[global_id.x * 2] = 0.0;
-        accelerations[global_id.x * 2 + 1] = -9.0;
+        accelerations[global_id.x * 2 + 1] = 0.0;
         
         calculateDensity(global_id);
     }

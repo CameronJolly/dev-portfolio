@@ -664,11 +664,6 @@ class Engine {
             particle.position.x = this.positions[particle.index * 2];
             particle.position.y = this.positions[(particle.index * 2) + 1];
         });
-        if(this.forceDirection){
-            this.applyOutwardForce(bounds);
-        }else{
-            this.applyInwardForce(bounds);
-        }
     }
 
     async readBufferIntoArray(buffer, byteLength, targetArray) {
@@ -696,6 +691,11 @@ class Engine {
         while (this.accumulator >= this.FIXED_DT && steps < this.MAX_STEPS) {
             // await this.applyWgslPhysics(this.FIXED_DT, bounds);
             this.stepPhysics(this.FIXED_DT,bounds)
+            if(this.forceDirection){
+                this.applyOutwardForce(bounds);
+            }else{
+                this.applyInwardForce(bounds);
+            }
             this.accumulator -= this.FIXED_DT;
             steps++;
         }
