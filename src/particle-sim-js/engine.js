@@ -120,9 +120,19 @@ class Engine {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
         })
 
+        this.positionsReadbackBuffer = this.device.createBuffer({
+            size: positionsBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
+        this.densitiesReadbackBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
         //buffer for globals needed for the sph pipeline
         this.sphCalcUniformBuffer = this.device.createBuffer({
-            size: 32,
+            size: 48,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
         });
 
@@ -166,16 +176,6 @@ class Engine {
                 module: shaderModule,
                 entryPoint: 'main'
             }
-        });
-
-        this.positionsReadbackBuffer = this.device.createBuffer({
-            size: positionsBytes,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-        });
-
-        this.densitiesReadbackBuffer = this.device.createBuffer({
-            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
         });
     }
 
@@ -605,7 +605,7 @@ class Engine {
 
         this.queue.writeBuffer(this.positionsBuffer, 0, this.positions);
 
-        const globalsBuffer = new ArrayBuffer(32);
+        const globalsBuffer = new ArrayBuffer(48);
         const globalsView = new DataView(globalsBuffer);
         globalsView.setFloat32(0, this.GAS_CONST, true);
         globalsView.setFloat32(4, this.REST_DENSITY, true);
@@ -615,6 +615,10 @@ class Engine {
         globalsView.setFloat32(20, h5, true);
         globalsView.setFloat32(24, h8, true);
         globalsView.setUint32(28, this.numParticles, true);
+        globalsView.setFloat32(32,this.GRAVITY_Y,true);
+        globalsView.setFloat32(36,dt,true);
+        globalsView.setFloat32(40, 0, true);
+        globalsView.setFloat32(44, 0, true);
         this.queue.writeBuffer(this.sphCalcUniformBuffer, 0, globalsBuffer);
 
         const boundsGlobalUniformBuffer = new Float32Array([
@@ -689,14 +693,14 @@ class Engine {
 
         let steps = 0;
         while (this.accumulator >= this.FIXED_DT && steps < this.MAX_STEPS) {
-            // await this.applyWgslPhysics(this.FIXED_DT, bounds);
-            this.stepPhysics(this.FIXED_DT,bounds)
+            await this.applyWgslPhysics(this.FIXED_DT, bounds);
+            // this.stepPhysics(this.FIXED_DT,bounds)
             if(this.forceDirection){
                 this.applyOutwardForce(bounds);
             }else{
                 this.applyInwardForce(bounds);
             }
-            this.accumulator -= this.FIXED_DT;
+              this.accumulator -= this.FIXED_DT;
             steps++;
         }
 

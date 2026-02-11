@@ -7,6 +7,9 @@ struct PressureGlobals {
     h5: f32,
     h8: f32,
     numParticles: u32,
+    gravity: f32,
+    dt: f32,
+    padding: vec2<f32>
 };
 
 struct Bounds{
@@ -53,50 +56,39 @@ fn spikyKernel(r2: f32, h: f32) -> f32 {
     return constant * term / dist;
 }
 
-fn getCellNum(posX: f32, posY: f32) -> f32 {
-    let cellX = floor(((posX*2.0) - bounds.maxX) / globals.h);
-    let cellY = floor((((posY*2.0)+1.0) - bounds.maxY) / globals.h);
-    return cellY*bounds.width + cellX;
-}
+@compute @workgroup_size(64)
+fn densityPass(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    if (global_id.x >= globals.numParticles) {
+        return;
+    }
 
-fn calculateDensity(global_id: vec3<u32>){
-    let epislon = 1e-4;
-
-    let ix = positions[global_id.x * 2u];
-    let iy = positions[global_id.x * 2u + 1u];
+    let idx = global_id.x;
+    let ix = positions[idx * 2u];
+    let iy = positions[idx * 2u + 1u];
+    let epsilon = 1e-4;
 
     var rho = 0.0;
 
-    for (var index: u32 = 0u; index < globals.numParticles; index += 1u) {
-        if (index == global_id.x) { continue; }
+    for (var j: u32 = 0u; j < globals.numParticles; j += 1u) {
+        if (j == idx) { continue; }
 
-        let jBase = index * 2u;
+        let jBase = j * 2u;
         let jx = positions[jBase];
         let jy = positions[jBase + 1u];
 
-        let dx = ix-jx;
-        let dy = iy-jy;
+        let dx = ix - jx;
+        let dy = iy - jy;
+        let r2 = dx * dx + dy * dy;
 
-        let r2 = dx*dx + dy*dy; 
-
-        if (index != global_id.x && r2 < epislon * epislon) {
-            const angle = 0.1 * 3.14159265359 * 2.0;
-            
-            positions[global_id.x * 2] += cos(angle) * epislon * 0.5;
-            positions[global_id.x * 2 + 1] += sin(angle) * epislon * 0.5;
-            positions[index * 2] -= cos(angle) * epislon * 0.5;
-            positions[index * 2 + 1] -= sin(angle) * epislon * 0.5;
-        }
-
-        if(r2 < globals.h2){
+        if (r2 < globals.h2) {
             rho += poly6Kernel(r2, globals.h2);
         }
-
     }
-    densities[global_id.x] = rho;
+    densities[idx] = rho;
 }
 
-fn calculatePressureForceAndViscocity(global_id: vec3<u32>){
+@compute @workgroup_size(64)
+fn forcePass(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x >= globals.numParticles) {
         return;
     }
@@ -110,7 +102,7 @@ fn calculatePressureForceAndViscocity(global_id: vec3<u32>){
     let pressure_i = max(0.0, globals.gasConst * (density_i - globals.restDensity));
 
     var fx = 0.0;
-    var fy = 0.0;
+    var fy = globals.gravity;
     var viscX = 0.0;
     var viscY = 0.0;
 
@@ -137,31 +129,40 @@ fn calculatePressureForceAndViscocity(global_id: vec3<u32>){
             fx -= coeff * grad.x;
             fy -= coeff * grad.y;
 
-            let jvx = velocities[j * 2];
-            let jvy = velocities[j * 2 + 1u];
+            let jvx = velocities[j * 2u];
+            let jvy = velocities[j * 2u + 1u];
             let w = poly6Kernel(r2, globals.h2);
             let invDensity_j = 1.0 / density_j;
-            let velDiff = vec2<f32>(jvx - ivx, jvy - ivy);
 
-            viscX += velDiff.x * invDensity_j * w;
-            viscY += velDiff.y * invDensity_j * w;
+            viscX += (jvx - ivx) * invDensity_j * w;
+            viscY += (jvy - ivy) * invDensity_j * w;
         }
     }
 
-    accelerations[idx * 2] += fx + (globals.viscosityCoeff * viscX);
-    accelerations[idx * 2 + 1] += fy + (globals.viscosityCoeff * viscY);
+    accelerations[idx * 2u] = fx + (globals.viscosityCoeff * viscX);
+    accelerations[idx * 2u + 1u] = fy + (globals.viscosityCoeff * viscY);
 }
 
-fn handleCollision(global_id: vec3<u32>){
+@compute @workgroup_size(64)
+fn integratePass(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x >= globals.numParticles) {
         return;
     }
 
     let idx = global_id.x;
-    var px = positions[idx * 2];
-    var py = positions[idx * 2 + 1];
-    var vx = velocities[idx * 2];
-    var vy = velocities[idx * 2 + 1];
+    let dt = globals.dt;
+
+    velocities[idx * 2u] += accelerations[idx * 2u] * dt;
+    velocities[idx * 2u + 1u] += accelerations[idx * 2u + 1u] * dt;
+
+    positions[idx * 2u] += velocities[idx * 2u] * dt;
+    positions[idx * 2u + 1u] += velocities[idx * 2u + 1u] * dt;
+
+    // Collision
+    var px = positions[idx * 2u];
+    var py = positions[idx * 2u + 1u];
+    var vx = velocities[idx * 2u];
+    var vy = velocities[idx * 2u + 1u];
 
     let minX = bounds.minX + PARTICLE_RADIUS;
     let maxX = bounds.maxX - PARTICLE_RADIUS;
@@ -188,36 +189,8 @@ fn handleCollision(global_id: vec3<u32>){
         vx *= WALL_FRICTION;
     }
 
-    positions[idx * 2] = px;
-    positions[idx * 2 + 1] = py;
-    velocities[idx * 2] = vx;
-    velocities[idx * 2 + 1] = vy;
-}
-
-fn applyphysics(global_id: vec3<u32>, dt: f32){
-    let idx = global_id.x;
-    
-    // Semi-implicit Euler with dt
-    velocities[idx * 2] += accelerations[idx * 2] * dt;
-    velocities[idx * 2 + 1] += accelerations[idx * 2 + 1] * dt;
-    
-    positions[idx * 2] += velocities[idx * 2] * dt;
-    positions[idx * 2 + 1] += velocities[idx * 2 + 1] * dt;
-}
-
-@compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let activated = global_id.x < globals.numParticles;
-    if (activated) {
-        accelerations[global_id.x * 2] = 0.0;
-        accelerations[global_id.x * 2 + 1] = 0.0;
-        
-        calculateDensity(global_id);
-    }
-    workgroupBarrier();
-    if (activated) {
-        calculatePressureForceAndViscocity(global_id);
-        handleCollision(global_id);
-        applyphysics(global_id, 0.009);
-    }
+    positions[idx * 2u] = px;
+    positions[idx * 2u + 1u] = py;
+    velocities[idx * 2u] = vx;
+    velocities[idx * 2u + 1u] = vy;
 }
