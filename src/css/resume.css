@@ -3,15 +3,37 @@ main {
   flex-direction: column;
   height: 100%;
   width: 100%;
-  margin-top: 3.3%;
 }
 
 .resume {
   width: 100%;
-  height: 90vh;
+  min-height: calc(100vh - 80px);
+  padding-top: 80px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-left: 2rem;
+  padding-right: 2rem;
+  padding-bottom: 2rem;
 }
 
 iframe {
-  height: 100%;
+  height: calc(100vh - 120px);
   width: 100%;
+  max-width: 900px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  background: white;
+}
+
+@media (max-width: 768px) {
+  .resume {
+    padding: 80px 1rem 1rem;
+  }
+  
+  iframe {
+    height: calc(100vh - 100px);
+    border-radius: 4px;
+  }
 }
