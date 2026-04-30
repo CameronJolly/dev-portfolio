@@ -48,6 +48,24 @@ class Engine {
     lastTime = 0;
     accumulator = 0;
 
+    //webgpu globals
+    queue;
+    device;
+    densitiesBuffer;
+    positionsBuffer;
+    accelerationsBuffer;
+    viscocitiesBuffer;
+    velocitiesBuffer;
+    sphCalcUniformBuffer;
+    boundsUniformBuffer;
+    sphCalcBindGroup;
+    computePipeline;
+    readbackBuffer;
+    positionsBufferSize;
+    positionsReadbackBuffer;
+
+
+
     async init() {
         await this.initWebGPU();
     }
@@ -62,8 +80,103 @@ class Engine {
             throw new Error("Couldn't request WebGPU adapter.");
         }
 
-        const device = await adapter.requestDevice();
-        console.log("WebGPU device acquired:", device);
+        this.device = await adapter.requestDevice();
+        this.queue = this.device.queue;
+
+        // getting wgsl text and parsing it for use in tsl pipeline
+        const shaderUrl = new URL('./compute-shaders/sphPipeline.wgsl', import.meta.url);
+        const shaderResponse = await fetch(shaderUrl);
+        const shaderCode = await shaderResponse.text();
+
+        // creating webgpu shader module which loads the raw wgsl an duses it
+        const shaderModule = this.device.createShaderModule({code: shaderCode});
+
+        //creating buffers to send to the gpu, they have to be strictly typed
+        this.densitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+        });
+
+        const positionsBytes = Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2;
+        this.positionsBufferSize = positionsBytes;
+        this.positionsBuffer = this.device.createBuffer({
+            size: positionsBytes,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+        })
+
+        this.accelerationsBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        this.viscocitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        
+        this.velocitiesBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles * 2,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+        })
+
+        this.positionsReadbackBuffer = this.device.createBuffer({
+            size: positionsBytes,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
+        this.densitiesReadbackBuffer = this.device.createBuffer({
+            size: Float32Array.BYTES_PER_ELEMENT * this.numParticles,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
+        //buffer for globals needed for the sph pipeline
+        this.sphCalcUniformBuffer = this.device.createBuffer({
+            size: 48,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        this.boundsUniformBuffer = this.device.createBuffer({
+            size: 32,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+
+        // creating layout for the pressure bind group (what is getting sent into the compute shader kernel)
+        const pressureBindGroupLayout = this.device.createBindGroupLayout({
+            entries: [
+                {binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'uniform'}},
+                {binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'uniform'}},
+                {binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+                {binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: {type: 'storage'}},
+            ]
+        })
+
+        this.sphCalcBindGroup = this.device.createBindGroup({
+            layout: pressureBindGroupLayout,
+            entries: [
+                {binding: 0, resource: {buffer: this.boundsUniformBuffer}},
+                {binding: 1, resource: {buffer: this.sphCalcUniformBuffer}},
+                {binding: 2, resource: {buffer: this.densitiesBuffer}},
+                {binding: 3, resource: {buffer: this.positionsBuffer}},
+                {binding: 4, resource: {buffer: this.accelerationsBuffer}},
+                {binding: 5, resource: {buffer: this.viscocitiesBuffer}},
+                {binding: 6, resource: {buffer: this.velocitiesBuffer}},
+            ]
+        });
+
+        //setup pressure compute pipeline
+        this.computePipeline = this.device.createComputePipeline({
+            layout: this.device.createPipelineLayout({
+                bindGroupLayouts: [pressureBindGroupLayout]
+            }),
+            compute: {
+                module: shaderModule,
+                entryPoint: 'main'
+            }
+        });
     }
 
     poly6Kernel(r2, h) {
@@ -112,7 +225,6 @@ class Engine {
         return neighbors;
     }
 
-    // New: gather all neighbor cells within a world-space radius
     getNeighborCellsInRadius(cellX, cellY, radius) {
         const cellR = Math.ceil(radius / this.H);
         const minCX = Math.max(0, cellX - cellR);
@@ -249,10 +361,32 @@ class Engine {
     }
 
     calculatePressure() {
+        // this.queue.writeBuffer(this.densitiesBuffer, 0, this.densities);
+        
+        // const pressureCalcUniformData = new Float32Array([
+        //     this.GAS_CONST,
+        //     this.REST_DENSITY,
+        //     0, 0
+        // ]);
+        // this.queue.writeBuffer(this.sphCalcUniformBuffer, 0, pressureCalcUniformData);
+
+        // const pressureCommandEncoder = this.device.createCommandEncoder();
+        // const passEncoder = pressureCommandEncoder.beginComputePass();
+
+        // passEncoder.setPipeline(this.computePipeline);
+        // passEncoder.setBindGroup(0, this.sphCalcBindGroup);
+
+        // const workgroupCount = Math.ceil(this.numParticles / 64);
+        // passEncoder.dispatchWorkgroups(workgroupCount);
+        // passEncoder.end();
+
+        // this.queue.submit([pressureCommandEncoder.finish()]);
+
         this.#particles.forEach(particle => {
             const pressure = this.GAS_CONST * (this.densities[particle.index]-this.REST_DENSITY);
             this.pressures[particle.index] = Math.max(0,pressure);
         });
+        
     }
 
     calculatePressureForce(bounds) {
@@ -432,7 +566,7 @@ class Engine {
         }
     }
 
-    stepPhysics(dt, bounds) {
+    async stepPhysics(dt, bounds) {
         // Reset accelerations
         for (let i = 0; i < this.accelerations.length/2; i++) {
             this.accelerations[i*2] = 0;
@@ -453,6 +587,7 @@ class Engine {
         this.calculatePressure();
         this.calculatePressureForce(bounds);
         this.applyViscosity(dt, bounds);
+        this.handleCollisions(bounds);
         if(this.forceDirection){
             this.applyOutwardForce(bounds);
         }else{
@@ -462,7 +597,87 @@ class Engine {
         this.applyPhysics(dt);
     }
 
-    update(now, bounds) {
+    async applyWgslPhysics(dt, bounds){
+        const h = this.H;
+        const h2 = this.H * this.H;
+        const h5 = h2 * h2 * this.H;
+        const h8 = h5 * h2 * this.H;
+
+        this.queue.writeBuffer(this.positionsBuffer, 0, this.positions);
+
+        const globalsBuffer = new ArrayBuffer(48);
+        const globalsView = new DataView(globalsBuffer);
+        globalsView.setFloat32(0, this.GAS_CONST, true);
+        globalsView.setFloat32(4, this.REST_DENSITY, true);
+        globalsView.setFloat32(8, this.VISCOSITY_COEFF, true);
+        globalsView.setFloat32(12, h, true);
+        globalsView.setFloat32(16, h2, true);
+        globalsView.setFloat32(20, h5, true);
+        globalsView.setFloat32(24, h8, true);
+        globalsView.setUint32(28, this.numParticles, true);
+        globalsView.setFloat32(32,this.GRAVITY_Y,true);
+        globalsView.setFloat32(36,dt,true);
+        globalsView.setFloat32(40, 0, true);
+        globalsView.setFloat32(44, 0, true);
+        this.queue.writeBuffer(this.sphCalcUniformBuffer, 0, globalsBuffer);
+
+        const boundsGlobalUniformBuffer = new Float32Array([
+            bounds.minX,
+            bounds.minY,
+            bounds.maxX,
+            bounds.maxY,
+            this.gridWidth,
+            this.gridHeight,
+            0,0
+        ])
+        this.queue.writeBuffer(this.boundsUniformBuffer, 0, boundsGlobalUniformBuffer);
+
+        const sphCommandEncoder = this.device.createCommandEncoder();
+        const passEncoder = sphCommandEncoder.beginComputePass();
+
+        passEncoder.setPipeline(this.computePipeline)
+        passEncoder.setBindGroup(0, this.sphCalcBindGroup);
+
+        const workgroupCount = Math.ceil(this.numParticles / 64);
+        passEncoder.dispatchWorkgroups(workgroupCount);
+        passEncoder.end();
+
+        sphCommandEncoder.copyBufferToBuffer(
+            this.positionsBuffer,
+            0,
+            this.positionsReadbackBuffer,
+            0,
+            this.positionsBufferSize
+        );
+
+        sphCommandEncoder.copyBufferToBuffer(
+            this.densitiesBuffer,
+            0,
+            this.densitiesReadbackBuffer,
+            0,
+            Float32Array.BYTES_PER_ELEMENT * this.numParticles
+        );
+
+        this.queue.submit([sphCommandEncoder.finish()]);
+        await this.queue.onSubmittedWorkDone();
+        
+        await this.readBufferIntoArray(this.positionsReadbackBuffer, this.positionsBufferSize, this.positions);
+        await this.readBufferIntoArray(this.densitiesReadbackBuffer, Float32Array.BYTES_PER_ELEMENT * this.numParticles, this.densities);
+        
+        this.#particles.forEach(particle => {
+            particle.position.x = this.positions[particle.index * 2];
+            particle.position.y = this.positions[(particle.index * 2) + 1];
+        });
+    }
+
+    async readBufferIntoArray(buffer, byteLength, targetArray) {
+        await buffer.mapAsync(GPUMapMode.READ, 0, byteLength);
+        const mapped = buffer.getMappedRange(0, byteLength);
+        targetArray.set(new Float32Array(mapped));
+        buffer.unmap();
+    }
+
+    async update(now, bounds) {
         if (this.lastTime === 0) {
             this.lastTime = now;
             // Initialize grid on first frame
@@ -478,9 +693,14 @@ class Engine {
 
         let steps = 0;
         while (this.accumulator >= this.FIXED_DT && steps < this.MAX_STEPS) {
-            this.stepPhysics(this.FIXED_DT, bounds);
-            this.handleCollisions(bounds);
-            this.accumulator -= this.FIXED_DT;
+            await this.applyWgslPhysics(this.FIXED_DT, bounds);
+            // this.stepPhysics(this.FIXED_DT,bounds)
+            if(this.forceDirection){
+                this.applyOutwardForce(bounds);
+            }else{
+                this.applyInwardForce(bounds);
+            }
+              this.accumulator -= this.FIXED_DT;
             steps++;
         }
 
@@ -560,7 +780,6 @@ class Engine {
             }
         }
     }
-
 
     addParticles(num, scene) {
         const oldCount = this.numParticles;
