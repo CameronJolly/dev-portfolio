@@ -208,7 +208,7 @@ export async function startParticleSim(hostElement) {
 
   const sliderCleanup = attachSliderHandlers();
 
-  const particleCount = 4500;
+  const particleCount = 1500;
   engine.createParticles(
     particleCount,
     bounds.minX,
