@@ -1,6 +1,5 @@
 import * as THREE from 'three/webgpu';
-import Engine from './engine.js';
-import { WebGLRenderer } from 'three';
+import Engine from "./engine.js";
 
 const raycaster = new THREE.Raycaster();
 const planeZ0 = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
@@ -26,7 +25,12 @@ function calculateViewportBounds(currentCamera) {
   const fov = currentCamera.fov * (Math.PI / 180);
   const height = 2 * Math.tan(fov / 2) * Math.abs(currentCamera.position.z);
   const width = height * currentCamera.aspect;
-  return { minX: -width / 2, maxX: width / 2, minY: -height / 2, maxY: height / 2 };
+  return {
+    minX: -width / 2,
+    maxX: width / 2,
+    minY: -height / 2,
+    maxY: height / 2,
+  };
 }
 
 function setupScene(hostElement) {
@@ -37,10 +41,7 @@ function setupScene(hostElement) {
   const height = hostElement.clientHeight || window.innerHeight;
 
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-  const useWebGPU = !/firefox/i.test(navigator.userAgent);
-  renderer = useWebGPU
-    ? new THREE.WebGPURenderer()
-    : new WebGLRenderer({ antialias: true });
+  renderer = new THREE.WebGPURenderer();
   renderer.setSize(width, height);
   renderer.domElement.style.width = "100%";
   renderer.domElement.style.height = "100%";
@@ -66,7 +67,10 @@ function setupScene(hostElement) {
     if (!engine || event.button !== 0) {
       return;
     }
-    if (event.target instanceof HTMLElement && event.target.closest(".settings-menu")) {
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.closest(".settings-menu")
+    ) {
       return;
     }
     pointerDown = true;
@@ -148,23 +152,34 @@ function attachSliderHandlers() {
     engine.forceDirection = !engine.forceDirection;
   };
   mouseBehaviour.addEventListener("change", mouseBehaviourHandler);
-  disposers.push(() => mouseBehaviour.removeEventListener("change", mouseBehaviourHandler));
+  disposers.push(() =>
+    mouseBehaviour.removeEventListener("change", mouseBehaviourHandler),
+  );
 
-  const restDensityHandler = (event) => engine.setRestDensity(event.target.value);
+  const restDensityHandler = (event) =>
+    engine.setRestDensity(event.target.value);
   restDensitySlider.addEventListener("input", restDensityHandler);
-  disposers.push(() => restDensitySlider.removeEventListener("input", restDensityHandler));
+  disposers.push(() =>
+    restDensitySlider.removeEventListener("input", restDensityHandler),
+  );
 
   const gravityHandler = (event) => engine.setGravity(event.target.value);
   gravitySlider.addEventListener("input", gravityHandler);
-  disposers.push(() => gravitySlider.removeEventListener("input", gravityHandler));
+  disposers.push(() =>
+    gravitySlider.removeEventListener("input", gravityHandler),
+  );
 
   const gasConstHandler = (event) => engine.setGasConst(event.target.value);
   gasConstSlider.addEventListener("input", gasConstHandler);
-  disposers.push(() => gasConstSlider.removeEventListener("input", gasConstHandler));
+  disposers.push(() =>
+    gasConstSlider.removeEventListener("input", gasConstHandler),
+  );
 
   const viscocityHandler = (event) => engine.setViscocity(event.target.value);
   viscocitySlider.addEventListener("input", viscocityHandler);
-  disposers.push(() => viscocitySlider.removeEventListener("input", viscocityHandler));
+  disposers.push(() =>
+    viscocitySlider.removeEventListener("input", viscocityHandler),
+  );
 
   const particleHandler = (event) => {
     const desiredCount = Number(event.target.value);
@@ -176,31 +191,27 @@ function attachSliderHandlers() {
     }
   };
   particleSlider.addEventListener("input", particleHandler);
-  disposers.push(() => particleSlider.removeEventListener("input", particleHandler));
+  disposers.push(() =>
+    particleSlider.removeEventListener("input", particleHandler),
+  );
 
   return () => {
     disposers.splice(0).forEach((dispose) => dispose());
   };
 }
 
-async function animate(now) {
+function animate(now) {
   if (!engine || !renderer || !camera || !bounds) {
     return;
   }
-
-  try {
-    await engine.update(now, bounds);
-    renderer.render(scene, camera);
-  } catch (err) {
-    console.error(err);
-    return;
-  }
-
   animationFrameId = requestAnimationFrame(animate);
+  engine.update(now, bounds);
+  renderer.renderAsync(scene, camera);
 }
 
 export async function startParticleSim(hostElement) {
   engine = new Engine();
+  await engine.init();
 
   const targetHost = hostElement || document.body;
   setupScene(targetHost);
@@ -215,12 +226,9 @@ export async function startParticleSim(hostElement) {
     bounds.maxX,
     bounds.minY,
     bounds.maxY,
-    scene
+    scene,
   );
-  await engine.init();
-  if (typeof renderer.init === "function") {
-    await renderer.init();
-  }
+
   animationFrameId = requestAnimationFrame(animate);
 
   return () => {
@@ -261,7 +269,10 @@ export async function startParticleSim(hostElement) {
 
     if (renderer) {
       renderer.dispose();
-      if (renderer.domElement && renderer.domElement.parentElement === targetHost) {
+      if (
+        renderer.domElement &&
+        renderer.domElement.parentElement === targetHost
+      ) {
         targetHost.removeChild(renderer.domElement);
       }
     }
