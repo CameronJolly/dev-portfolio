@@ -210,8 +210,18 @@ function animate(now) {
 }
 
 export async function startParticleSim(hostElement) {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = 0;
+  }
+  if (renderer) {
+    renderer.dispose();
+    if (renderer.domElement && renderer.domElement.parentElement) {
+      renderer.domElement.parentElement.removeChild(renderer.domElement);
+    }
+    renderer = null;
+  }
   engine = new Engine();
-  await engine.init();
 
   const targetHost = hostElement || document.body;
   setupScene(targetHost);

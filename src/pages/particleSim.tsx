@@ -17,7 +17,12 @@ function ParticleSim() {
         if (!mounted || !canvasHostRef.current) {
           return;
         }
-        dispose = await module.startParticleSim(canvasHostRef.current);
+        const cleanup = await module.startParticleSim(canvasHostRef.current);
+        if (!mounted) {
+          cleanup();
+        } else {
+          dispose = cleanup;
+        }
       } catch (error) {
         console.error("Failed to start particle simulation", error);
       }

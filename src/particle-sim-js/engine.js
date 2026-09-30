@@ -50,23 +50,6 @@ class Engine {
   lastTime = 0;
   accumulator = 0;
 
-  async init() {
-    await this.initWebGPU();
-  }
-
-  async initWebGPU() {
-    if (!navigator.gpu) {
-      throw new Error("WebGPU not supported in this browser.");
-    }
-
-    const adapter = await navigator.gpu.requestAdapter();
-    if (!adapter) {
-      throw new Error("Couldn't request WebGPU adapter.");
-    }
-
-    const device = await adapter.requestDevice();
-    console.log("WebGPU device acquired:", device);
-  }
 
   poly6Kernel(r2, h) {
     const h2 = h * h;
@@ -170,23 +153,37 @@ class Engine {
   }
 
   applyPhysics(dt) {
-    // Semi-implicit Euler
-    for (let idx = 0; idx < this.numParticles; idx++) {
-      this.velocities[idx * 2] += this.accelerations[idx * 2] * dt;
-      this.velocities[idx * 2 + 1] += this.accelerations[idx * 2 + 1] * dt;
+    // Semi-implicit Euler with velocity clamping
+    const MAX_SPEED = 25.0;
+    const MAX_SPEED_SQ = MAX_SPEED * MAX_SPEED;
 
-      this.positions[idx * 2] += this.velocities[idx * 2] * dt;
-      this.positions[idx * 2 + 1] += this.velocities[idx * 2 + 1] * dt;
+    for (let idx = 0; idx < this.numParticles; idx++) {
+      let vx = this.velocities[idx * 2] + this.accelerations[idx * 2] * dt;
+      let vy = this.velocities[idx * 2 + 1] + this.accelerations[idx * 2 + 1] * dt;
+
+      const speedSq = vx * vx + vy * vy;
+      if (speedSq > MAX_SPEED_SQ) {
+        const factor = MAX_SPEED / Math.sqrt(speedSq);
+        vx *= factor;
+        vy *= factor;
+      }
+
+      this.velocities[idx * 2] = vx;
+      this.velocities[idx * 2 + 1] = vy;
+
+      this.positions[idx * 2] += vx * dt;
+      this.positions[idx * 2 + 1] += vy * dt;
     }
   }
 
   calculateDensity(bounds) {
     const h2 = this.H * this.H;
-    const EPSILON = 1e-4; // Small separation distance
+    const EPSILON = 1e-3;
+    const EPSILON_SQ = EPSILON * EPSILON;
 
     for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
-      const tx = this.positions[targetElem * 2];
-      const ty = this.positions[targetElem * 2 + 1];
+      let tx = this.positions[targetElem * 2];
+      let ty = this.positions[targetElem * 2 + 1];
       const cellX = Math.floor((tx - bounds.minX) / this.H);
       const cellY = Math.floor((ty - bounds.minY) / this.H);
 
@@ -202,25 +199,30 @@ class Engine {
           const cell = this.cells[rowOffset + cx];
           for (let k = 0; k < cell.length; k++) {
             const outerElem = cell[k];
+            if (outerElem === targetElem) continue;
+
             const ox = this.positions[outerElem * 2];
             const oy = this.positions[outerElem * 2 + 1];
-            const dx = ox - tx;
-            const dy = oy - ty;
-            const r2 = dx * dx + dy * dy;
+            let dx = ox - tx;
+            let dy = oy - ty;
+            let r2 = dx * dx + dy * dy;
 
             // Separate overlapping particles
-            if (outerElem !== targetElem && r2 < EPSILON * EPSILON) {
-              // Generate small random offset to prevent particles from staying stuck
+            if (r2 < EPSILON_SQ) {
               const angle = Math.random() * Math.PI * 2;
-              const offsetDist = EPSILON;
+              const offX = Math.cos(angle) * EPSILON * 0.5;
+              const offY = Math.sin(angle) * EPSILON * 0.5;
 
-              this.positions[targetElem * 2] +=
-                Math.cos(angle) * offsetDist * 0.5;
-              this.positions[targetElem * 2 + 1] +=
-                Math.sin(angle) * offsetDist * 0.5;
-              this.positions[outerElem * 2] -= Math.cos(angle) * offsetDist * 0.5;
-              this.positions[outerElem * 2 + 1] -=
-                Math.sin(angle) * offsetDist * 0.5;
+              tx += offX;
+              ty += offY;
+              this.positions[targetElem * 2] = tx;
+              this.positions[targetElem * 2 + 1] = ty;
+              this.positions[outerElem * 2] -= offX;
+              this.positions[outerElem * 2 + 1] -= offY;
+
+              dx = (ox - offX) - tx;
+              dy = (oy - offY) - ty;
+              r2 = dx * dx + dy * dy;
             }
 
             if (r2 <= h2) {
@@ -402,22 +404,22 @@ class Engine {
       // Left/right walls
       if (px < minX) {
         px = minX;
-        vx = -vx * this.RESTITUTION;
+        if (vx < 0) vx = -vx * this.RESTITUTION;
         vy *= this.WALL_FRICTION;
       } else if (px > maxX) {
         px = maxX;
-        vx = -vx * this.RESTITUTION;
+        if (vx > 0) vx = -vx * this.RESTITUTION;
         vy *= this.WALL_FRICTION;
       }
 
       // Bottom/top walls
       if (py < minY) {
         py = minY;
-        vy = -vy * this.RESTITUTION;
+        if (vy < 0) vy = -vy * this.RESTITUTION;
         vx *= this.WALL_FRICTION;
       } else if (py > maxY) {
         py = maxY;
-        vy = -vy * this.RESTITUTION;
+        if (vy > 0) vy = -vy * this.RESTITUTION;
         vx *= this.WALL_FRICTION;
       }
 
@@ -570,7 +572,7 @@ class Engine {
           if (r2 === 0 || r2 > rMax2) continue;
 
           const r = Math.sqrt(r2);
-          const invR = 1 / r;
+          const invR = 1 / Math.max(r, 0.1);
           const falloff = 1 - r / radius;
           const scaled = strength * falloff * falloff;
 
@@ -618,7 +620,7 @@ class Engine {
           if (r2 === 0 || r2 > rMax2) continue;
 
           const r = Math.sqrt(r2);
-          const invR = 1 / r;
+          const invR = 1 / Math.max(r, 0.1);
           const falloff = 1 - r / radius;
           const scaled = strength * falloff * falloff;
 
@@ -655,8 +657,8 @@ class Engine {
 
     for (let i = 0; i < actualAdd; i++) {
       const index = oldCount + i;
-      this.positions[index * 2] = this.mouseX || 0;
-      this.positions[index * 2 + 1] = this.mouseY || 0;
+      this.positions[index * 2] = (this.mouseX || 0) + (Math.random() - 0.5) * 0.05;
+      this.positions[index * 2 + 1] = (this.mouseY || 0) + (Math.random() - 0.5) * 0.05;
       this.velocities[index * 2] = 0;
       this.velocities[index * 2 + 1] = 0;
       this.accelerations[index * 2] = 0;
