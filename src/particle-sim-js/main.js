@@ -206,15 +206,26 @@ function animate(now) {
   }
   animationFrameId = requestAnimationFrame(animate);
   engine.update(now, bounds);
-  renderer.renderAsync(scene, camera);
+  renderer.render(scene, camera);
 }
 
 export async function startParticleSim(hostElement) {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = 0;
+  }
+  if (renderer) {
+    renderer.dispose();
+    if (renderer.domElement && renderer.domElement.parentElement) {
+      renderer.domElement.parentElement.removeChild(renderer.domElement);
+    }
+    renderer = null;
+  }
   engine = new Engine();
-  await engine.init();
 
   const targetHost = hostElement || document.body;
   setupScene(targetHost);
+  await renderer.init();
   bounds = calculateViewportBounds(camera);
 
   const sliderCleanup = attachSliderHandlers();
@@ -265,6 +276,7 @@ export async function startParticleSim(hostElement) {
 
     if (engine) {
       engine.setMousePosWorldCord(Number.NaN, Number.NaN);
+      engine.dispose(scene);
     }
 
     if (renderer) {
