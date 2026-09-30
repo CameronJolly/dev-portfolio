@@ -206,7 +206,7 @@ function animate(now) {
   }
   animationFrameId = requestAnimationFrame(animate);
   engine.update(now, bounds);
-  renderer.renderAsync(scene, camera);
+  renderer.render(scene, camera);
 }
 
 export async function startParticleSim(hostElement) {
@@ -215,6 +215,7 @@ export async function startParticleSim(hostElement) {
 
   const targetHost = hostElement || document.body;
   setupScene(targetHost);
+  await renderer.init();
   bounds = calculateViewportBounds(camera);
 
   const sliderCleanup = attachSliderHandlers();
@@ -265,6 +266,7 @@ export async function startParticleSim(hostElement) {
 
     if (engine) {
       engine.setMousePosWorldCord(Number.NaN, Number.NaN);
+      engine.dispose(scene);
     }
 
     if (renderer) {

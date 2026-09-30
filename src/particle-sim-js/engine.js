@@ -9,7 +9,9 @@ class particle extends THREE.Mesh {
 }
 
 class Engine {
-  #particles = [];
+  instancedMesh = null;
+  #dummy = new THREE.Object3D();
+  #color = new THREE.Color();
   numParticles;
 
   forceDirection = true;
@@ -138,8 +140,8 @@ class Engine {
   }
 
   createParticles(numParticles, minX, maxX, minY, maxY, scene) {
-    // allocate gpu ready arrays for eventual sending into kernel
-    this.#particles = [];
+    const maxCapacity = 10000;
+    this.numParticles = numParticles;
 
     this.positions = new Float32Array(numParticles * 2);
     this.velocities = new Float32Array(numParticles * 2);
@@ -158,61 +160,61 @@ class Engine {
       this.cells.push([]);
     }
 
-    //even distribution - grid layout
+    // even distribution - grid layout
     const gridCols = Math.ceil(Math.sqrt(numParticles));
     const gridRows = Math.ceil(numParticles / gridCols);
     const spacingX = (maxX - minX) / (gridCols + 1);
     const spacingY = (maxY - minY) / (gridRows + 1);
 
-    for (let index = 0; index < numParticles; index++) {
-      const geometry = new THREE.CircleGeometry(0.07, 10);
-      const material = new THREE.MeshBasicMaterial({ color: 0x4fd9f7 });
-      let newParticle = new particle(geometry, material);
+    const geometry = new THREE.CircleGeometry(0.07, 10);
+    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.instancedMesh = new THREE.InstancedMesh(geometry, material, maxCapacity);
+    this.instancedMesh.count = numParticles;
 
+    for (let index = 0; index < numParticles; index++) {
       const col = index % gridCols;
       const row = Math.floor(index / gridCols);
 
-      newParticle.index = index;
-      newParticle.position.x = minX + (col + 1) * spacingX;
-      newParticle.position.y = minY + (row + 1) * spacingY;
+      const px = minX + (col + 1) * spacingX;
+      const py = minY + (row + 1) * spacingY;
 
-      this.positions[index * 2] = newParticle.position.x;
-      this.positions[index * 2 + 1] = newParticle.position.y;
+      this.positions[index * 2] = px;
+      this.positions[index * 2 + 1] = py;
 
-      const cellY = Math.floor((newParticle.position.y - minY) / this.H);
-      const cellX = Math.floor((newParticle.position.x - minX) / this.H);
-      this.cells[cellY * this.gridWidth + cellX].push(newParticle.index);
+      const cellY = Math.floor((py - minY) / this.H);
+      const cellX = Math.floor((px - minX) / this.H);
+      this.cells[cellY * this.gridWidth + cellX].push(index);
 
-      scene.add(newParticle);
-      this.#particles.push(newParticle);
+      this.#dummy.position.set(px, py, 0);
+      this.#dummy.updateMatrix();
+      this.instancedMesh.setMatrixAt(index, this.#dummy.matrix);
+      this.instancedMesh.setColorAt(index, this.#color.set(0x4fd9f7));
     }
 
-    this.numParticles = this.#particles.length;
-    return this.#particles;
+    this.instancedMesh.instanceMatrix.needsUpdate = true;
+    if (this.instancedMesh.instanceColor) {
+      this.instancedMesh.instanceColor.needsUpdate = true;
+    }
+    scene.add(this.instancedMesh);
+    return this.instancedMesh;
   }
 
   applyPhysics(dt) {
     // Semi-implicit Euler
-    this.#particles.forEach((p) => {
-      const idx = p.index;
-
+    for (let idx = 0; idx < this.numParticles; idx++) {
       this.velocities[idx * 2] += this.accelerations[idx * 2] * dt;
       this.velocities[idx * 2 + 1] += this.accelerations[idx * 2 + 1] * dt;
 
       this.positions[idx * 2] += this.velocities[idx * 2] * dt;
       this.positions[idx * 2 + 1] += this.velocities[idx * 2 + 1] * dt;
-
-      p.position.x = this.positions[idx * 2];
-      p.position.y = this.positions[idx * 2 + 1];
-    });
+    }
   }
 
   calculateDensity(bounds) {
     const h2 = this.H * this.H;
     const EPSILON = 1e-4; // Small separation distance
 
-    this.#particles.forEach((p) => {
-      const targetElem = p.index;
+    for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
       const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
       const neighborCells = this.getNeighborCells(cellX, cellY);
 
@@ -248,22 +250,21 @@ class Engine {
         });
       });
       this.densities[targetElem] = rho;
-    });
+    }
   }
 
   calculatePressure() {
-    this.#particles.forEach((particle) => {
+    for (let i = 0; i < this.numParticles; i++) {
       const pressure =
-        this.GAS_CONST * (this.densities[particle.index] - this.REST_DENSITY);
-      this.pressures[particle.index] = Math.max(0, pressure);
-    });
+        this.GAS_CONST * (this.densities[i] - this.REST_DENSITY);
+      this.pressures[i] = Math.max(0, pressure);
+    }
   }
 
   calculatePressureForce(bounds) {
     const h2 = this.H * this.H;
 
-    this.#particles.forEach((p) => {
-      const targetElem = p.index;
+    for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
       const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
       const neighborCells = this.getNeighborCells(cellX, cellY);
 
@@ -312,14 +313,13 @@ class Engine {
 
       this.accelerations[targetElem * 2] += fx;
       this.accelerations[targetElem * 2 + 1] += fy;
-    });
+    }
   }
 
   applyViscosity(dt, bounds) {
     const h2 = this.H * this.H;
 
-    this.#particles.forEach((p) => {
-      const targetElem = p.index;
+    for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
       const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
       const neighborCells = this.getNeighborCells(cellX, cellY);
 
@@ -360,27 +360,31 @@ class Engine {
 
       this.velocities[targetElem * 2] += this.VISCOSITY_COEFF * corrX * dt;
       this.velocities[targetElem * 2 + 1] += this.VISCOSITY_COEFF * corrY * dt;
-    });
+    }
   }
 
     setColorBasedOnDensity() {
         let minD = Infinity;
         let maxD = -Infinity;
         
-        for (let i = 0; i < this.densities.length; i++) {
+        for (let i = 0; i < this.numParticles; i++) {
             if (this.densities[i] < minD) minD = this.densities[i];
             if (this.densities[i] > maxD) maxD = this.densities[i];
         }
         
         const range = Math.max(maxD - minD, 1e-8);
 
-        this.#particles.forEach(p => {
-            const t = (this.densities[p.index] - minD) / range;
+        for (let i = 0; i < this.numParticles; i++) {
+            const t = (this.densities[i] - minD) / range;
             const red = t * 1.7;
             const green = 0;
             const blue = 1 - t;
-            p.material.color.setRGB(red, green, blue);
-        });
+            this.#color.setRGB(red, green, blue);
+            this.instancedMesh.setColorAt(i, this.#color);
+        }
+        if (this.instancedMesh.instanceColor) {
+            this.instancedMesh.instanceColor.needsUpdate = true;
+        }
     }
 
   handleCollisions(bounds) {
@@ -389,8 +393,7 @@ class Engine {
     const minY = bounds.minY + this.PARTICLE_RADIUS;
     const maxY = bounds.maxY - this.PARTICLE_RADIUS;
 
-    this.#particles.forEach((p) => {
-      const idx = p.index;
+    for (let idx = 0; idx < this.numParticles; idx++) {
       let px = this.positions[idx * 2];
       let py = this.positions[idx * 2 + 1];
       let vx = this.velocities[idx * 2];
@@ -418,15 +421,12 @@ class Engine {
         vx *= this.WALL_FRICTION;
       }
 
-      // Write back to arrays and particle object
+      // Write back to arrays
       this.positions[idx * 2] = px;
       this.positions[idx * 2 + 1] = py;
       this.velocities[idx * 2] = vx;
       this.velocities[idx * 2 + 1] = vy;
-
-      p.position.x = px;
-      p.position.y = py;
-    });
+    }
   }
 
   rebuildGrid(bounds) {
@@ -456,17 +456,17 @@ class Engine {
 
     this.rebuildGrid(bounds);
     this.cells.forEach((cell) => (cell.length = 0));
-    this.#particles.forEach((p) => {
-      const { cellX, cellY } = this.getCellCoords(p.index, bounds);
+    for (let i = 0; i < this.numParticles; i++) {
+      const { cellX, cellY } = this.getCellCoords(i, bounds);
       if (
         cellX >= 0 &&
         cellX < this.gridWidth &&
         cellY >= 0 &&
         cellY < this.gridHeight
       ) {
-        this.cells[cellY * this.gridWidth + cellX].push(p.index);
+        this.cells[cellY * this.gridWidth + cellX].push(i);
       }
-    });
+    }
 
     // SPH pipeline
     this.calculateDensity(bounds);
@@ -505,10 +505,23 @@ class Engine {
     }
 
     this.setColorBasedOnDensity();
+
+    if (this.instancedMesh) {
+      for (let i = 0; i < this.numParticles; i++) {
+        this.#dummy.position.set(
+          this.positions[i * 2],
+          this.positions[i * 2 + 1],
+          0,
+        );
+        this.#dummy.updateMatrix();
+        this.instancedMesh.setMatrixAt(i, this.#dummy.matrix);
+      }
+      this.instancedMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   getParticles() {
-    return this.#particles;
+    return [];
   }
 
   applyOutwardForce(bounds, radius = 5.0, strength = 125) {
@@ -595,7 +608,9 @@ class Engine {
 
   addParticles(num, scene) {
     const oldCount = this.numParticles;
-    const newCount = oldCount + num;
+    const newCount = Math.min(10000, oldCount + num);
+    const actualAdd = newCount - oldCount;
+    if (actualAdd <= 0) return;
 
     const newPositions = new Float32Array(newCount * 2);
     const newVelocities = new Float32Array(newCount * 2);
@@ -615,41 +630,27 @@ class Engine {
     this.pressures = newPressures;
     this.densities = newDensities;
 
-    for (let i = 0; i < num; i++) {
+    for (let i = 0; i < actualAdd; i++) {
       const index = oldCount + i;
-
-      const geometry = new THREE.CircleGeometry(0.07, 10);
-      const material = new THREE.MeshBasicMaterial({ color: 0x4fd9f7 });
-      let newParticle = new particle(geometry, material);
-
-      newParticle.index = index;
-      newParticle.position.x = this.mouseX || 0;
-      newParticle.position.y = this.mouseY || 0;
-
-      this.positions[index * 2] = newParticle.position.x;
-      this.positions[index * 2 + 1] = newParticle.position.y;
+      this.positions[index * 2] = this.mouseX || 0;
+      this.positions[index * 2 + 1] = this.mouseY || 0;
       this.velocities[index * 2] = 0;
       this.velocities[index * 2 + 1] = 0;
       this.accelerations[index * 2] = 0;
       this.accelerations[index * 2 + 1] = this.GRAVITY_Y;
       this.densities[index] = 0;
       this.pressures[index] = 0;
-
-      this.#particles.push(newParticle);
-      scene.add(newParticle);
     }
 
-    this.numParticles = this.#particles.length;
+    this.numParticles = newCount;
+    if (this.instancedMesh) {
+      this.instancedMesh.count = newCount;
+    }
   }
 
   removeParticles(num, scene) {
     const actualRemove = Math.min(num, this.numParticles);
     const newCount = this.numParticles - actualRemove;
-
-    for (let i = 0; i < actualRemove; i++) {
-      const removedParticle = this.#particles.pop();
-      scene.remove(removedParticle);
-    }
 
     this.positions = this.positions.slice(0, newCount * 2);
     this.velocities = this.velocities.slice(0, newCount * 2);
@@ -657,7 +658,22 @@ class Engine {
     this.pressures = this.pressures.slice(0, newCount);
     this.densities = this.densities.slice(0, newCount);
 
-    this.numParticles = this.#particles.length;
+    this.numParticles = newCount;
+    if (this.instancedMesh) {
+      this.instancedMesh.count = newCount;
+    }
+  }
+
+  dispose(scene) {
+    if (this.instancedMesh) {
+      if (scene) {
+        scene.remove(this.instancedMesh);
+      }
+      this.instancedMesh.geometry.dispose();
+      this.instancedMesh.material.dispose();
+      this.instancedMesh.dispose();
+      this.instancedMesh = null;
+    }
   }
 
   setMousePosWorldCord(x, y) {
