@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 
 class particle extends THREE.Mesh {
     index;
@@ -123,6 +123,7 @@ class Engine {
     const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.instancedMesh = new THREE.InstancedMesh(geometry, material, maxCapacity);
     this.instancedMesh.count = numParticles;
+    this.instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
     for (let index = 0; index < numParticles; index++) {
       const col = index % gridCols;
@@ -146,6 +147,7 @@ class Engine {
 
     this.instancedMesh.instanceMatrix.needsUpdate = true;
     if (this.instancedMesh.instanceColor) {
+      this.instancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
       this.instancedMesh.instanceColor.needsUpdate = true;
     }
     scene.add(this.instancedMesh);

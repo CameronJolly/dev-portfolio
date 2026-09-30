@@ -48,6 +48,14 @@ function setupScene(hostElement) {
   renderer.domElement.style.display = "block";
   hostElement.appendChild(renderer.domElement);
 
+  renderer.onDeviceLost = (info) => {
+    console.warn("WebGPU Device Lost:", info);
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = 0;
+    }
+  };
+
   scene.background = new THREE.Color("black");
   camera.position.z = 10;
 
@@ -201,12 +209,20 @@ function attachSliderHandlers() {
 }
 
 function animate(now) {
-  if (!engine || !renderer || !camera || !bounds) {
+  if (!engine || !renderer || !camera || !bounds || renderer._isDeviceLost) {
     return;
   }
   animationFrameId = requestAnimationFrame(animate);
   engine.update(now, bounds);
-  renderer.render(scene, camera);
+  try {
+    renderer.render(scene, camera);
+  } catch (err) {
+    console.error("Renderer error, stopping animation loop:", err);
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = 0;
+    }
+  }
 }
 
 export async function startParticleSim(hostElement) {
