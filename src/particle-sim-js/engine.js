@@ -99,37 +99,7 @@ class Engine {
     };
   }
 
-  getNeighborCells(cellX, cellY) {
-    const neighbors = [];
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = cellX + dx;
-        const ny = cellY + dy;
-        if (nx >= 0 && nx < this.gridWidth && ny >= 0 && ny < this.gridHeight) {
-          const cellIndex = ny * this.gridWidth + nx;
-          neighbors.push(this.cells[cellIndex]);
-        }
-      }
-    }
-    return neighbors;
-  }
 
-  // New: gather all neighbor cells within a world-space radius
-  getNeighborCellsInRadius(cellX, cellY, radius) {
-    const cellR = Math.ceil(radius / this.H);
-    const minCX = Math.max(0, cellX - cellR);
-    const maxCX = Math.min(this.gridWidth - 1, cellX + cellR);
-    const minCY = Math.max(0, cellY - cellR);
-    const maxCY = Math.min(this.gridHeight - 1, cellY + cellR);
-
-    const cells = [];
-    for (let y = minCY; y <= maxCY; y++) {
-      for (let x = minCX; x <= maxCX; x++) {
-        cells.push(this.cells[y * this.gridWidth + x]);
-      }
-    }
-    return cells;
-  }
 
   getCellCoords(particleIndex, bounds) {
     const px = this.positions[particleIndex * 2];
@@ -215,40 +185,50 @@ class Engine {
     const EPSILON = 1e-4; // Small separation distance
 
     for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
-      const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
-      const neighborCells = this.getNeighborCells(cellX, cellY);
+      const tx = this.positions[targetElem * 2];
+      const ty = this.positions[targetElem * 2 + 1];
+      const cellX = Math.floor((tx - bounds.minX) / this.H);
+      const cellY = Math.floor((ty - bounds.minY) / this.H);
+
+      const minCX = Math.max(0, cellX - 1);
+      const maxCX = Math.min(this.gridWidth - 1, cellX + 1);
+      const minCY = Math.max(0, cellY - 1);
+      const maxCY = Math.min(this.gridHeight - 1, cellY + 1);
 
       let rho = 0;
-      neighborCells.forEach((cell) => {
-        cell.forEach((outerElem) => {
-          const ox = this.positions[outerElem * 2];
-          const oy = this.positions[outerElem * 2 + 1];
-          const tx = this.positions[targetElem * 2];
-          const ty = this.positions[targetElem * 2 + 1];
-          const dx = ox - tx;
-          const dy = oy - ty;
-          const r2 = dx * dx + dy * dy;
+      for (let cy = minCY; cy <= maxCY; cy++) {
+        const rowOffset = cy * this.gridWidth;
+        for (let cx = minCX; cx <= maxCX; cx++) {
+          const cell = this.cells[rowOffset + cx];
+          for (let k = 0; k < cell.length; k++) {
+            const outerElem = cell[k];
+            const ox = this.positions[outerElem * 2];
+            const oy = this.positions[outerElem * 2 + 1];
+            const dx = ox - tx;
+            const dy = oy - ty;
+            const r2 = dx * dx + dy * dy;
 
-          // Separate overlapping particles
-          if (outerElem !== targetElem && r2 < EPSILON * EPSILON) {
-            // Generate small random offset to prevent particles from staying stuck
-            const angle = Math.random() * Math.PI * 2;
-            const offsetDist = EPSILON;
+            // Separate overlapping particles
+            if (outerElem !== targetElem && r2 < EPSILON * EPSILON) {
+              // Generate small random offset to prevent particles from staying stuck
+              const angle = Math.random() * Math.PI * 2;
+              const offsetDist = EPSILON;
 
-            this.positions[targetElem * 2] +=
-              Math.cos(angle) * offsetDist * 0.5;
-            this.positions[targetElem * 2 + 1] +=
-              Math.sin(angle) * offsetDist * 0.5;
-            this.positions[outerElem * 2] -= Math.cos(angle) * offsetDist * 0.5;
-            this.positions[outerElem * 2 + 1] -=
-              Math.sin(angle) * offsetDist * 0.5;
+              this.positions[targetElem * 2] +=
+                Math.cos(angle) * offsetDist * 0.5;
+              this.positions[targetElem * 2 + 1] +=
+                Math.sin(angle) * offsetDist * 0.5;
+              this.positions[outerElem * 2] -= Math.cos(angle) * offsetDist * 0.5;
+              this.positions[outerElem * 2 + 1] -=
+                Math.sin(angle) * offsetDist * 0.5;
+            }
+
+            if (r2 <= h2) {
+              rho += this.poly6Kernel(r2, this.H);
+            }
           }
-
-          if (r2 <= h2) {
-            rho += this.poly6Kernel(r2, this.H);
-          }
-        });
-      });
+        }
+      }
       this.densities[targetElem] = rho;
     }
   }
@@ -265,51 +245,61 @@ class Engine {
     const h2 = this.H * this.H;
 
     for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
-      const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
-      const neighborCells = this.getNeighborCells(cellX, cellY);
+      const ix = this.positions[targetElem * 2];
+      const iy = this.positions[targetElem * 2 + 1];
+      const cellX = Math.floor((ix - bounds.minX) / this.H);
+      const cellY = Math.floor((iy - bounds.minY) / this.H);
+
+      const minCX = Math.max(0, cellX - 1);
+      const maxCX = Math.min(this.gridWidth - 1, cellX + 1);
+      const minCY = Math.max(0, cellY - 1);
+      const maxCY = Math.min(this.gridHeight - 1, cellY + 1);
 
       let fx = 0,
         fy = 0;
 
-      neighborCells.forEach((cell) => {
-        cell.forEach((outerElem) => {
-          if (outerElem === targetElem) {
-            return;
+      for (let cy = minCY; cy <= maxCY; cy++) {
+        const rowOffset = cy * this.gridWidth;
+        for (let cx = minCX; cx <= maxCX; cx++) {
+          const cell = this.cells[rowOffset + cx];
+          for (let k = 0; k < cell.length; k++) {
+            const outerElem = cell[k];
+            if (outerElem === targetElem) {
+              continue;
+            }
+
+            const jx = this.positions[outerElem * 2];
+            const jy = this.positions[outerElem * 2 + 1];
+
+            const dx = ix - jx;
+            const dy = iy - jy;
+            const r2 = dx * dx + dy * dy;
+
+            if (r2 > 0 && r2 <= h2) {
+              const { gradWx, gradWy } = this.spikyKernel(dx, dy, r2, this.H);
+
+              const density_i = Math.max(
+                this.densities[targetElem],
+                this.DENSITY_EPS,
+              );
+              const density_j = Math.max(
+                this.densities[outerElem],
+                this.DENSITY_EPS,
+              );
+              const denom_i = density_i * density_i;
+              const denom_j = density_j * density_j;
+
+              const pressure_i = this.pressures[targetElem];
+              const pressure_j = this.pressures[outerElem];
+
+              const coeff = pressure_i / denom_i + pressure_j / denom_j;
+
+              fx -= coeff * gradWx;
+              fy -= coeff * gradWy;
+            }
           }
-
-          const ix = this.positions[targetElem * 2];
-          const iy = this.positions[targetElem * 2 + 1];
-          const jx = this.positions[outerElem * 2];
-          const jy = this.positions[outerElem * 2 + 1];
-
-          const dx = ix - jx;
-          const dy = iy - jy;
-          const r2 = dx * dx + dy * dy;
-
-          if (r2 > 0 && r2 <= h2) {
-            const { gradWx, gradWy } = this.spikyKernel(dx, dy, r2, this.H);
-
-            const density_i = Math.max(
-              this.densities[targetElem],
-              this.DENSITY_EPS,
-            );
-            const density_j = Math.max(
-              this.densities[outerElem],
-              this.DENSITY_EPS,
-            );
-            const denom_i = density_i * density_i;
-            const denom_j = density_j * density_j;
-
-            const pressure_i = this.pressures[targetElem];
-            const pressure_j = this.pressures[outerElem];
-
-            const coeff = pressure_i / denom_i + pressure_j / denom_j;
-
-            fx -= coeff * gradWx;
-            fy -= coeff * gradWy;
-          }
-        });
-      });
+        }
+      }
 
       this.accelerations[targetElem * 2] += fx;
       this.accelerations[targetElem * 2 + 1] += fy;
@@ -320,43 +310,53 @@ class Engine {
     const h2 = this.H * this.H;
 
     for (let targetElem = 0; targetElem < this.numParticles; targetElem++) {
-      const { cellX, cellY } = this.getCellCoords(targetElem, bounds);
-      const neighborCells = this.getNeighborCells(cellX, cellY);
+      const ix = this.positions[targetElem * 2];
+      const iy = this.positions[targetElem * 2 + 1];
+      const cellX = Math.floor((ix - bounds.minX) / this.H);
+      const cellY = Math.floor((iy - bounds.minY) / this.H);
+
+      const minCX = Math.max(0, cellX - 1);
+      const maxCX = Math.min(this.gridWidth - 1, cellX + 1);
+      const minCY = Math.max(0, cellY - 1);
+      const maxCY = Math.min(this.gridHeight - 1, cellY + 1);
 
       let corrX = 0,
         corrY = 0;
 
-      neighborCells.forEach((cell) => {
-        cell.forEach((outerElem) => {
-          if (outerElem === targetElem) {
-            return;
+      for (let cy = minCY; cy <= maxCY; cy++) {
+        const rowOffset = cy * this.gridWidth;
+        for (let cx = minCX; cx <= maxCX; cx++) {
+          const cell = this.cells[rowOffset + cx];
+          for (let k = 0; k < cell.length; k++) {
+            const outerElem = cell[k];
+            if (outerElem === targetElem) {
+              continue;
+            }
+
+            const jx = this.positions[outerElem * 2];
+            const jy = this.positions[outerElem * 2 + 1];
+
+            const ivx = this.velocities[targetElem * 2];
+            const ivy = this.velocities[targetElem * 2 + 1];
+            const jvx = this.velocities[outerElem * 2];
+            const jvy = this.velocities[outerElem * 2 + 1];
+
+            const dx = jx - ix;
+            const dy = jy - iy;
+            const r2 = dx * dx + dy * dy;
+
+            if (r2 > 0 && r2 <= h2) {
+              const w = this.poly6Kernel(r2, this.H);
+              const densityJ = Math.max(
+                this.densities[outerElem],
+                this.DENSITY_EPS,
+              );
+              corrX += (jvx - ivx) * (1 / densityJ) * w;
+              corrY += (jvy - ivy) * (1 / densityJ) * w;
+            }
           }
-
-          const ix = this.positions[targetElem * 2];
-          const iy = this.positions[targetElem * 2 + 1];
-          const jx = this.positions[outerElem * 2];
-          const jy = this.positions[outerElem * 2 + 1];
-
-          const ivx = this.velocities[targetElem * 2];
-          const ivy = this.velocities[targetElem * 2 + 1];
-          const jvx = this.velocities[outerElem * 2];
-          const jvy = this.velocities[outerElem * 2 + 1];
-
-          const dx = jx - ix;
-          const dy = jy - iy;
-          const r2 = dx * dx + dy * dy;
-
-          if (r2 > 0 && r2 <= h2) {
-            const w = this.poly6Kernel(r2, this.H);
-            const densityJ = Math.max(
-              this.densities[outerElem],
-              this.DENSITY_EPS,
-            );
-            corrX += (jvx - ivx) * (1 / densityJ) * w;
-            corrY += (jvy - ivy) * (1 / densityJ) * w;
-          }
-        });
-      });
+        }
+      }
 
       this.velocities[targetElem * 2] += this.VISCOSITY_COEFF * corrX * dt;
       this.velocities[targetElem * 2 + 1] += this.VISCOSITY_COEFF * corrY * dt;
@@ -430,17 +430,21 @@ class Engine {
   }
 
   rebuildGrid(bounds) {
-    const minX = bounds.minX;
-    const maxX = bounds.maxX;
-    const minY = bounds.minY;
-    const maxY = bounds.maxY;
+    const nextWidth = Math.ceil((bounds.maxX - bounds.minX) / this.H);
+    const nextHeight = Math.ceil((bounds.maxY - bounds.minY) / this.H);
+    const totalCells = nextWidth * nextHeight;
 
-    // Recalculate grid dimensions
-    this.gridWidth = Math.ceil((maxX - minX) / this.H);
-    this.gridHeight = Math.ceil((maxY - minY) / this.H);
-    const totalCells = this.gridWidth * this.gridHeight;
+    if (
+      this.gridWidth === nextWidth &&
+      this.gridHeight === nextHeight &&
+      this.cells.length === totalCells
+    ) {
+      return;
+    }
 
-    // Rebuild cell array
+    this.gridWidth = nextWidth;
+    this.gridHeight = nextHeight;
+
     this.cells = [];
     for (let cellIndex = 0; cellIndex < totalCells; cellIndex++) {
       this.cells.push([]);
@@ -455,9 +459,14 @@ class Engine {
     }
 
     this.rebuildGrid(bounds);
-    this.cells.forEach((cell) => (cell.length = 0));
+    for (let c = 0; c < this.cells.length; c++) {
+      this.cells[c].length = 0;
+    }
     for (let i = 0; i < this.numParticles; i++) {
-      const { cellX, cellY } = this.getCellCoords(i, bounds);
+      const px = this.positions[i * 2];
+      const py = this.positions[i * 2 + 1];
+      const cellX = Math.floor((px - bounds.minX) / this.H);
+      const cellY = Math.floor((py - bounds.minY) / this.H);
       if (
         cellX >= 0 &&
         cellX < this.gridWidth &&
@@ -539,28 +548,35 @@ class Engine {
     )
       return;
 
-    const neighborCells = this.getNeighborCellsInRadius(cellX, cellY, radius);
+    const cellR = Math.ceil(radius / this.H);
+    const minCX = Math.max(0, cellX - cellR);
+    const maxCX = Math.min(this.gridWidth - 1, cellX + cellR);
+    const minCY = Math.max(0, cellY - cellR);
+    const maxCY = Math.min(this.gridHeight - 1, cellY + cellR);
 
-    for (let c = 0; c < neighborCells.length; c++) {
-      const cell = neighborCells[c];
-      for (let n = 0; n < cell.length; n++) {
-        const pIdx = cell[n];
-        const pX = this.positions[pIdx * 2];
-        const pY = this.positions[pIdx * 2 + 1];
+    for (let y = minCY; y <= maxCY; y++) {
+      const rowOffset = y * this.gridWidth;
+      for (let x = minCX; x <= maxCX; x++) {
+        const cell = this.cells[rowOffset + x];
+        for (let n = 0; n < cell.length; n++) {
+          const pIdx = cell[n];
+          const pX = this.positions[pIdx * 2];
+          const pY = this.positions[pIdx * 2 + 1];
 
-        const dx = pX - this.mouseX;
-        const dy = pY - this.mouseY;
-        const r2 = dx * dx + dy * dy;
+          const dx = pX - this.mouseX;
+          const dy = pY - this.mouseY;
+          const r2 = dx * dx + dy * dy;
 
-        if (r2 === 0 || r2 > rMax2) continue;
+          if (r2 === 0 || r2 > rMax2) continue;
 
-        const r = Math.sqrt(r2);
-        const invR = 1 / r;
-        const falloff = 1 - r / radius;
-        const scaled = strength * falloff * falloff;
+          const r = Math.sqrt(r2);
+          const invR = 1 / r;
+          const falloff = 1 - r / radius;
+          const scaled = strength * falloff * falloff;
 
-        this.accelerations[pIdx * 2] += dx * invR * scaled;
-        this.accelerations[pIdx * 2 + 1] += dy * invR * scaled;
+          this.accelerations[pIdx * 2] += dx * invR * scaled;
+          this.accelerations[pIdx * 2 + 1] += dy * invR * scaled;
+        }
       }
     }
   }
@@ -580,28 +596,35 @@ class Engine {
     )
       return;
 
-    const neighborCells = this.getNeighborCellsInRadius(cellX, cellY, radius);
+    const cellR = Math.ceil(radius / this.H);
+    const minCX = Math.max(0, cellX - cellR);
+    const maxCX = Math.min(this.gridWidth - 1, cellX + cellR);
+    const minCY = Math.max(0, cellY - cellR);
+    const maxCY = Math.min(this.gridHeight - 1, cellY + cellR);
 
-    for (let c = 0; c < neighborCells.length; c++) {
-      const cell = neighborCells[c];
-      for (let n = 0; n < cell.length; n++) {
-        const pIdx = cell[n];
-        const pX = this.positions[pIdx * 2];
-        const pY = this.positions[pIdx * 2 + 1];
+    for (let y = minCY; y <= maxCY; y++) {
+      const rowOffset = y * this.gridWidth;
+      for (let x = minCX; x <= maxCX; x++) {
+        const cell = this.cells[rowOffset + x];
+        for (let n = 0; n < cell.length; n++) {
+          const pIdx = cell[n];
+          const pX = this.positions[pIdx * 2];
+          const pY = this.positions[pIdx * 2 + 1];
 
-        const dx = pX - this.mouseX;
-        const dy = pY - this.mouseY;
-        const r2 = dx * dx + dy * dy;
+          const dx = pX - this.mouseX;
+          const dy = pY - this.mouseY;
+          const r2 = dx * dx + dy * dy;
 
-        if (r2 === 0 || r2 > rMax2) continue;
+          if (r2 === 0 || r2 > rMax2) continue;
 
-        const r = Math.sqrt(r2);
-        const invR = 1 / r;
-        const falloff = 1 - r / radius;
-        const scaled = strength * falloff * falloff;
+          const r = Math.sqrt(r2);
+          const invR = 1 / r;
+          const falloff = 1 - r / radius;
+          const scaled = strength * falloff * falloff;
 
-        this.accelerations[pIdx * 2] -= dx * invR * scaled;
-        this.accelerations[pIdx * 2 + 1] -= dy * invR * scaled;
+          this.accelerations[pIdx * 2] -= dx * invR * scaled;
+          this.accelerations[pIdx * 2 + 1] -= dy * invR * scaled;
+        }
       }
     }
   }
